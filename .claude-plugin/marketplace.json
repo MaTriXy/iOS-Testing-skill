@@ -1,0 +1,21 @@
+{
+  "name": "ioloro",
+  "owner": {
+    "name": "ioloro"
+  },
+  "metadata": {
+    "description": "ioloro Claude Code plugins",
+    "version": "1.0.0"
+  },
+  "plugins": [
+    {
+      "name": "ios-testing",
+      "source": {
+        "source": "npm",
+        "package": "@ioloro/ios-testing",
+        "version": "^1.0.0"
+      },
+      "description": "Swift Testing, XCTest, and XCUITest skill for writing correct, modern iOS/macOS tests"
+    }
+  ]
+}
