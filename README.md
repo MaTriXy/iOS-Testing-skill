@@ -36,9 +36,21 @@ npm install -g @ioloro/ios-testing
 | File | Covers |
 |------|--------|
 | `SKILL.md` | Framework selection rules, critical rules, decision tree |
-| `swift-testing.md` | `@Test`, `@Suite`, `#expect`, `#require`, parameterized tests, traits, tags, async patterns, `confirmation()` |
-| `xctest.md` | `measure {}`, all `XCTMetric` subclasses, manual measurement, signpost-based energy testing, baselines |
-| `xcuitest.md` | Element queries, accessibility identifiers, waiting patterns, launch config, scroll/animation performance, accessibility audits, page object pattern |
+| `swift-testing.md` | `@Test`, `@Suite`, `#expect`, `#require`, parameterized tests, traits, tags, async patterns, `confirmation()`, exit tests, attachments, custom scoping traits |
+| `xctest.md` | `measure {}`, all `XCTMetric` subclasses, manual measurement, signpost-based energy testing, baselines, power profiling |
+| `xcuitest.md` | Element queries, waiting patterns, launch config, scroll/animation performance, hitch metrics, accessibility audits, screenshot capture, multi-variant screenshot testing, real device testing, screenshot extraction and review website generation, page object pattern |
+
+### Highlights
+
+- **Multi-variant screenshot pipeline** — capture every screen across themes, appearances, and user types with structured naming
+- **Screenshot review website** — automatically generates an HTML gallery grouping screenshots by screen with side-by-side variant comparison, and opens it in the browser
+- **Real device testing** — UDID-based destinations, signing setup, fresh install for NUX/onboarding capture
+- **Accessibility audits** — automated contrast, hit region, dynamic type, and text clipping checks (iOS 17+)
+- **Animation hitch testing** — `XCTOSSignpostMetric` sub-metrics for scroll deceleration, dragging, navigation transitions
+- **Parameterized tests** — tuples, `CaseIterable`, cartesian products, `zip()` patterns
+- **Exit tests** — process crash verification (Swift 6.2+)
+- **Energy/power measurement** — `os_signpost` instrumentation with `XCTOSSignpostMetric` for CPU, memory, and power correlation
+- **Page object pattern** — encapsulated screen interactions for maintainable UI tests
 
 ## License
 
