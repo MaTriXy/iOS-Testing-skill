@@ -4,6 +4,7 @@ description: >
   Use when writing, modifying, or reviewing tests for iOS/macOS apps.
   Activates for Swift Testing (@Test, #expect, @Suite), XCTest (XCTestCase, measure, XCTAssert),
   XCUITest (XCUIApplication, XCUIElement), performance testing, animation hitch testing,
+  Instruments .trace file analysis (CPU profiling, system trace, allocations, etc.),
   or when the user asks to write tests.
 ---
 
@@ -25,8 +26,8 @@ Choose the correct framework based on what you are testing:
 | Light/dark mode appearance testing | **XCUITest** (launch args) | `import XCTest` |
 | Contrast and visibility testing | **XCUITest** (accessibility audit) | `import XCTest` |
 | Snapshot/visual regression testing | **XCTest** (+ swift-snapshot-testing) | `import XCTest` |
-| Screenshot capture across variants | **XCUITest** (XCTAttachment) | `import XCTest` |
 | Exit/crash tests (Swift 6.2+) | **Swift Testing** | `import Testing` |
+| Analyzing .trace files from Instruments | **xctrace CLI** | N/A (command-line tool) |
 
 ## Critical Rules
 
@@ -81,12 +82,24 @@ Choose the correct framework based on what you are testing:
 - Using hardcoded colors (`UIColor.black`, `Color.white`) instead of semantic colors.
 - Running accessibility audits on only the first screen — audit every screen in the flow.
 
+## Analyzing .trace Files
+
+You can read and analyze Xcode Instruments `.trace` files directly. When a user provides a `.trace` file:
+
+1. **Export the TOC** with `xctrace export --input /path/to/file.trace --toc` to discover available data tables.
+2. **Export specific tables** using `--xpath '/trace-toc/run/data/table[@schema="<schema-name>"]'`.
+3. **Analyze the XML output** — look for hot call stacks, blocked threads, long syscalls, memory pressure, etc.
+4. **Suggest code improvements** based on the findings.
+
+See the [trace analysis reference](trace-analysis.md) for the complete guide including the .trace file structure, all common schemas by template type, XML output format, and analysis workflow.
+
 ## Reference Files
 
 For detailed patterns and code examples, see:
 - [Swift Testing patterns and examples](swift-testing.md)
 - [XCTest performance, power, and energy testing](xctest.md)
 - [XCUITest UI automation and animation testing](xcuitest.md)
+- [Instruments .trace file analysis](trace-analysis.md)
 
 ## When Generating Tests
 

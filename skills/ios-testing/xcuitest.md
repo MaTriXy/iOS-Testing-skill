@@ -845,6 +845,59 @@ func handleSystemAlerts(timeout: TimeInterval = 2.0) -> Bool {
 
 Call `handleSystemAlerts()` after every `app.launch()` and before each onboarding step — TCC prompts can appear at any time during a fresh install flow.
 
+### Notification Banners (Apple Intelligence, etc.)
+
+System notification banners (e.g. "Ready for Apple Intelligence") can appear at any time and overlay your app's UI, ruining screenshots. These are **not** alerts — they're banner views hosted by Springboard.
+
+**Key insight:** `addUIInterruptionMonitor` does **not** work for notification banners. You must interact with Springboard directly and swipe them away.
+
+```swift
+/// Dismiss notification banners that overlay the app (e.g. Apple Intelligence prompts).
+/// Call this before every screenshot capture, not just at launch — banners can arrive at any time.
+private func dismissNotificationBanners() {
+    let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
+
+    for identifier in ["NotificationShortLookView", "Notification"] {
+        let banner = springboard.otherElements[identifier]
+        if banner.waitForExistence(timeout: 0.5) {
+            banner.swipeUp()
+            Thread.sleep(forTimeInterval: 0.3)
+        }
+    }
+}
+```
+
+**When to call:**
+- **After `app.launch()`** — add a 2-second delay first to let banners arrive, then dismiss.
+- **Before every `saveScreenshot()` call** — banners can appear mid-test.
+
+```swift
+private func launchApp() {
+    app = XCUIApplication()
+    app.launch()
+
+    // Wait for system notifications to arrive, then dismiss
+    Thread.sleep(forTimeInterval: 2)
+    handleSystemAlerts()        // Permission dialogs first
+    dismissNotificationBanners() // Then banners
+}
+
+private func saveScreenshot(name: String) {
+    dismissNotificationBanners()  // Clear any banners that appeared since launch
+    let screenshot = app.screenshot()
+    // ... save screenshot
+}
+```
+
+**Prevention:** For simulators, you can suppress some notifications before running tests:
+```bash
+# Reset the simulator to clear pending notification state
+xcrun simctl shutdown <UDID>
+xcrun simctl boot <UDID>
+```
+
+However, some system notifications (like Apple Intelligence setup prompts) reappear after every boot. The dismiss-before-capture approach is the most reliable solution.
+
 ## Extracting Screenshots from Test Results
 
 ### Export Attachments
