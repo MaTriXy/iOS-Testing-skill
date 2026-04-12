@@ -1,7 +1,7 @@
 {
   "name": "@ioloro/ios-testing",
   "version": "1.0.0",
-  "description": "Claude Code skill for Swift Testing, XCTest, and XCUITest — write correct, modern iOS/macOS tests",
+  "description": "Claude Code skill for Swift Testing, XCTest, XCUITest, and Instruments .trace analysis — write correct, modern iOS/macOS tests and diagnose performance issues",
   "keywords": [
     "claude-code",
     "plugin",
@@ -9,6 +9,8 @@
     "swift-testing",
     "xctest",
     "xcuitest",
+    "instruments",
+    "trace-analysis",
     "ios",
     "macos",
     "testing",

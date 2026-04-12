@@ -1,8 +1,138 @@
 # Xcode Instruments Trace (.trace) File Analysis Reference
 
-You can read and analyze `.trace` files directly using the `xctrace` CLI tool. This lets you diagnose performance issues, CPU bottlenecks, memory leaks, and more — without requiring the user to open Instruments.
+You can read and analyze `.trace` files directly using the `trace2json.py` script or the `xctrace` CLI tool. This lets you diagnose performance issues, CPU bottlenecks, memory leaks, and more — without requiring the user to open Instruments.
 
-## .trace File Structure
+## Quick Start — trace2json.py (Preferred)
+
+The `trace2json.py` script exports all trace data to a single JSON file, which Claude can read directly. This is faster and requires only one shell command.
+
+### Locate the Script
+
+```bash
+# The script lives alongside this skill file
+SCRIPT=$(find ~/.claude -name "trace2json.py" -path "*/ios-testing/*" 2>/dev/null | head -1)
+```
+
+### Usage
+
+```bash
+python3 "$SCRIPT" /path/to/file.trace [--output path.json] [--limit 5000] [--schemas time-sample,syscall,...]
+```
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `--output`, `-o` | `<trace>.json` | Output JSON file path |
+| `--limit`, `-l` | `5000` | Max rows per table (prevents huge output) |
+| `--schemas`, `-s` | auto | Comma-separated schemas to export. Default: exports all available schemas, prioritizing common ones |
+
+### JSON Structure
+
+```json
+{
+  "metadata": {
+    "device": {"name": "...", "os-version": "...", "device-type": "...", "platform": "..."},
+    "process": {"name": "...", "pid": "..."},
+    "available_schemas": ["time-sample", "syscall", ...],
+    "warnings": ["Schema 'foo' truncated: 5000/23456 rows", ...]
+  },
+  "tables": {
+    "time-sample": {
+      "row_count": 5000,
+      "total_row_count": 23456,
+      "truncated": true,
+      "rows": [
+        {
+          "time": {"value": 123456789, "fmt": "1.23 s"},
+          "thread": {"name": "main", "tid": "0x1234"},
+          "backtrace": [
+            {"name": "functionName", "addr": "0x1234", "binary": "MyApp"},
+            {"name": "callerName", "addr": "0x5678", "binary": "UIKitCore"}
+          ]
+        }
+      ]
+    }
+  }
+}
+```
+
+**Key details:**
+- All `id`/`ref` deduplication is resolved inline — the JSON is self-contained
+- Backtraces are flat arrays of frames (max 20 per backtrace)
+- Durations/timestamps: `{"value": <nanoseconds>, "fmt": "1.23 s"}`
+- `null` values (XML sentinels) are omitted
+- Each table reports `row_count` (exported) vs `total_row_count` (in trace)
+- Truncation and export failures are recorded in `metadata.warnings`
+
+### Default Schema Priority
+
+When `--schemas` is not specified, the script exports these schemas first (if present), then any remaining schemas found in the trace:
+
+1. `time-sample` — CPU time samples with call stacks
+2. `os-signpost-arg` — Signpost intervals (SwiftUI, App Launch, custom)
+3. `syscall` — System calls with duration and backtraces
+4. `context-switch` — Thread scheduling events
+5. `thread-narrative` — High-level thread activity summary
+6. `virtual-memory` — Page faults, memory pressure
+7. `thread-info` — Thread names and types
+8. `os-log-arg` — OS log messages
+
+## Analysis Workflow
+
+When a user provides a `.trace` file:
+
+### 1. Export to JSON
+
+```bash
+SCRIPT=$(find ~/.claude -name "trace2json.py" -path "*/ios-testing/*" 2>/dev/null | head -1)
+python3 "$SCRIPT" /path/to/file.trace
+```
+
+### 2. Read and Analyze
+
+Use the Read tool to open the JSON file. Check `metadata` first for device/process info and warnings, then examine relevant tables.
+
+### 3. What to Look For
+
+**CPU/Performance (`time-sample`)**:
+- Hot call stacks — functions appearing repeatedly in backtraces
+- Main thread blocked or running heavy computation
+- Threads stuck in `Blocked` or `Wait` states
+
+**Scheduling (`context-switch`, `thread-narrative`)**:
+- Frequent preemptions
+- Long blocked durations (contention)
+- Priority inversions
+
+**System Calls (`syscall`)**:
+- High wait time vs CPU time (I/O bound)
+- Frequent short-duration syscalls in tight loops
+- Failed syscalls (non-zero errno)
+
+**Memory (`virtual-memory`)**:
+- Page faults, memory pressure events
+- Large allocation patterns
+
+**Signposts (`os-signpost-arg`)**:
+- Long-duration intervals (slow operations)
+- SwiftUI body evaluation times
+- Custom app signpost performance
+
+### 4. Suggest Improvements
+
+After identifying issues, suggest specific code changes:
+- Move heavy work off the main thread
+- Reduce lock contention (use actors, or finer-grained locks)
+- Batch I/O operations to reduce syscall overhead
+- Add caching to reduce redundant computation
+- Use `os_signpost` to instrument suspected slow code paths
+
+---
+
+## Manual Workflow (Fallback)
+
+If `trace2json.py` is unavailable or you need to inspect a specific schema interactively, use `xctrace` directly.
+
+### .trace File Structure
 
 A `.trace` file is a directory bundle containing:
 
@@ -24,11 +154,7 @@ MyTrace.trace/
 └── UI_state_metadata.bin       # Instruments UI state
 ```
 
-## Reading Traces with xctrace
-
 ### Step 1: Export the Table of Contents
-
-Always start by exporting the TOC to discover what data the trace contains:
 
 ```bash
 xctrace export --input /path/to/file.trace --toc
@@ -37,11 +163,11 @@ xctrace export --input /path/to/file.trace --toc
 This returns XML describing:
 - **Target device** and OS version
 - **Profiled process** (name, PID)
-- **All data tables** with their `schema` names — these are what you query
+- **All data tables** with their `schema` names
 
 ### Step 2: Identify Available Schemas
 
-Extract the schema names from the TOC output. Common schemas by template type:
+Common schemas by template type:
 
 | Instruments Template | Key Schemas |
 |---------------------|-------------|
@@ -63,39 +189,35 @@ Extract the schema names from the TOC output. Common schemas by template type:
 
 ### Step 3: Export Table Data
 
-Export a specific table by schema name using XPath:
-
 ```bash
 xctrace export --input /path/to/file.trace \
   --xpath '/trace-toc/run/data/table[@schema="time-sample"]'
 ```
 
-The output is XML with a `<schema>` header describing columns, followed by `<row>` elements.
-
 ### Common Export Commands
 
 ```bash
-# CPU time samples (call stacks, thread states, core assignment)
+# CPU time samples
 xctrace export --input file.trace \
   --xpath '/trace-toc/run/data/table[@schema="time-sample"]'
 
-# System calls with duration, CPU time, wait time, and backtraces
+# System calls
 xctrace export --input file.trace \
   --xpath '/trace-toc/run/data/table[@schema="syscall"]'
 
-# Context switches (thread scheduling events)
+# Context switches
 xctrace export --input file.trace \
   --xpath '/trace-toc/run/data/table[@schema="context-switch"]'
 
-# Thread narrative (high-level thread activity summary)
+# Thread narrative
 xctrace export --input file.trace \
   --xpath '/trace-toc/run/data/table[@schema="thread-narrative"]'
 
-# Virtual memory events
+# Virtual memory
 xctrace export --input file.trace \
   --xpath '/trace-toc/run/data/table[@schema="virtual-memory"]'
 
-# os_signpost intervals (Points of Interest, SwiftUI, custom signposts)
+# Signposts
 xctrace export --input file.trace \
   --xpath '/trace-toc/run/data/table[@schema="os-signpost-arg"]'
 
@@ -103,43 +225,31 @@ xctrace export --input file.trace \
 xctrace export --input file.trace \
   --xpath '/trace-toc/run/data/table[@schema="os-log-arg"]'
 
-# Thread info (thread names, types)
+# Thread info
 xctrace export --input file.trace \
   --xpath '/trace-toc/run/data/table[@schema="thread-info"]'
-
-# Dynamic library loads
-xctrace export --input file.trace \
-  --xpath '/trace-toc/run/data/table[@schema="dyld-library-load"]'
 ```
 
-## Understanding the XML Output
+### Understanding the XML Output
 
-### Schema Header
-
-Each exported table starts with a `<schema>` element listing the columns:
+#### Schema Header
 
 ```xml
 <schema name="time-sample">
   <col><mnemonic>time</mnemonic><name>Timestamp</name><engineering-type>sample-time</engineering-type></col>
   <col><mnemonic>thread</mnemonic><name>Thread</name><engineering-type>thread</engineering-type></col>
-  <col><mnemonic>core-index</mnemonic><name>Core Index</name><engineering-type>core</engineering-type></col>
-  <col><mnemonic>thread-state</mnemonic><name>Thread State</name><engineering-type>thread-state</engineering-type></col>
   <!-- ... -->
 </schema>
 ```
 
-### Row Data
+#### Row Data
 
-Rows contain typed elements matching the schema. Key patterns:
+- **`id` and `ref` attributes**: `id="N"` defines a value; `ref="N"` references it (deduplication). Always resolve refs when parsing.
+- **`fmt` attribute**: Human-readable formatted value.
+- **`<sentinel/>`**: Null/missing value.
+- **Nested elements**: Threads contain process info, backtraces contain frames.
 
-- **`id` and `ref` attributes**: Elements with `id="N"` define a value; elements with `ref="N"` reference a previously defined value (deduplication). Always resolve refs when parsing.
-- **`fmt` attribute**: Human-readable formatted value (use this for display).
-- **`<sentinel/>`**: Represents a null/missing value for that column.
-- **Nested elements**: Threads contain process info, backtraces contain frame lists, etc.
-
-### Backtrace Frames
-
-Call stacks appear as `<backtrace>` elements with `<frame>` children:
+#### Backtrace Frames
 
 ```xml
 <backtrace id="14">
@@ -149,13 +259,10 @@ Call stacks appear as `<backtrace>` elements with `<frame>` children:
   <frame name="_dispatch_kq_poll" addr="0x10194b9b8">
     <binary name="libdispatch.dylib" UUID="..." path="/usr/lib/system/introspection/libdispatch.dylib"/>
   </frame>
-  <!-- ... more frames ... -->
 </backtrace>
 ```
 
-### Duration Values
-
-Durations are in nanoseconds (raw value) with a `fmt` attribute for human-readable form:
+#### Duration Values
 
 ```xml
 <duration id="8" fmt="2.17 µs">2167</duration>
@@ -163,72 +270,7 @@ Durations are in nanoseconds (raw value) with a `fmt` attribute for human-readab
 <duration-waiting id="78" fmt="200.76 ms">200763625</duration-waiting>
 ```
 
-## Analysis Workflow
-
-When a user provides a `.trace` file, follow this workflow:
-
-### 1. Discover Contents
-
-```bash
-xctrace export --input /path/to/file.trace --toc
-```
-
-From the TOC, identify:
-- What app was profiled (process name and PID)
-- What device and OS (simulator vs physical)
-- Which instrument schemas are available
-
-### 2. Export Relevant Tables
-
-Based on the user's concern, export the most relevant tables. For large traces, pipe through `head` to sample first:
-
-```bash
-xctrace export --input file.trace \
-  --xpath '/trace-toc/run/data/table[@schema="time-sample"]' | head -500
-```
-
-### 3. Analyze and Report
-
-Look for these common issues in the data:
-
-**CPU/Performance (time-sample, CPU Counters)**:
-- Threads spending excessive time in specific functions (hot call stacks)
-- Main thread blocked or running heavy computation
-- Threads stuck in `Blocked` or `Wait` states
-- High instruction delivery/processing bottleneck ratios (CPU Counters)
-
-**Scheduling (context-switch, thread-narrative)**:
-- Frequent preemptions ("balanced off CPU to optimize performance")
-- Long blocked durations with lock/event IDs (contention)
-- Threads going idle unexpectedly
-- Priority inversions (low-priority thread holding resource needed by high-priority)
-
-**System Calls (syscall)**:
-- Syscalls with high `Wait Time` vs `CPU Time` (I/O bound)
-- Frequent short-duration syscalls in tight loops
-- Failed syscalls (non-zero errno)
-
-**Memory (virtual-memory)**:
-- Page faults, memory pressure events
-- Large allocation patterns
-
-**Signposts (os-signpost-arg)**:
-- Long-duration signpost intervals (slow operations)
-- SwiftUI body evaluation times
-- Custom app signpost performance
-
-### 4. Suggest Improvements
-
-After identifying issues, suggest specific code changes:
-- Move heavy work off the main thread
-- Reduce lock contention (use actors, or finer-grained locks)
-- Batch I/O operations to reduce syscall overhead
-- Add caching to reduce redundant computation
-- Use `os_signpost` to instrument suspected slow code paths for future profiling
-
 ## Available Instruments Templates
-
-These are the standard templates available for recording traces:
 
 - **Activity Monitor** — Overall system activity
 - **Allocations** — Memory allocation tracking and leak detection
@@ -257,8 +299,8 @@ These are the standard templates available for recording traces:
 
 ## Tips
 
-- **Large traces**: The XML output can be very large. Use `head -N` to sample, or redirect to a file for parsing.
-- **XPath limitations**: The `--xpath` flag supports basic XPath. If a query crashes (some complex swift-table schemas can), fall back to exporting the TOC and using simpler schema queries.
-- **Multiple runs**: A trace can contain multiple runs. Use `/trace-toc/run[@number="1"]/data/table[...]` to target a specific run.
-- **Symbolication**: Exported backtraces include symbolicated frame names when symbol archives are present in the trace bundle. If frames show only addresses, the symbols may be missing.
-- **Custom instruments**: Third-party or custom instrument packages may add schemas not listed above. Always check the TOC first.
+- **Large traces**: Use `--limit` with `trace2json.py` to cap rows. For manual export, pipe through `head -N`.
+- **XPath limitations**: Some complex schemas crash `xctrace`. The script handles this gracefully with try/except. For manual use, fall back to simpler schema queries.
+- **Multiple runs**: A trace can contain multiple runs. For manual export, use `/trace-toc/run[@number="1"]/data/table[...]`.
+- **Symbolication**: Backtraces include symbolicated names when symbol archives are present. If frames show only addresses, symbols may be missing.
+- **Custom instruments**: Third-party instruments may add schemas not listed above. Always check the TOC (or `metadata.available_schemas` in JSON).
